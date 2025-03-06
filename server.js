@@ -1,63 +1,42 @@
 const axios = require("axios");
 
-const API_URL = "http://localhost:3001/"; // API endpoint
+const API_URL = "http://localhost:3001/";
 let tps = 500; // Initial TPS
-const offset = 100; // Increase/decrease offset
-const interval = 5000; // Apply offset every 5 seconds
-const duration = 20000; // Total test duration in milliseconds
-const totalTransactions = 1000; // Total transactions per second
-
-const sendRequests = async (currentTps) => {
-  let successfulRequests = 0;
-  let failedRequests = 0;
-  let requestsSent = 0;
-
-  const requests = Array.from(
-    { length: Math.min(currentTps, totalTransactions) },
-    async () => {
-      if (requestsSent < totalTransactions) {
-        try {
-          await axios.get(API_URL);
-          successfulRequests++;
-        } catch (error) {
-          failedRequests++;
-        }
-        requestsSent++;
-      } else {
-        failedRequests++;
-      }
-    }
-  );
-
-  await Promise.all(requests);
-  console.log(
-    `TPS: ${currentTps} | Successful: ${successfulRequests}, Failed: ${failedRequests}`
-  );
-};
+const offset = 100; // Increase TPS after a certain time
+const interval = 5000; // Time interval for increasing the tps
+const duration = 20000; // total test duration 
 
 const runLoadTest = async () => {
   const startTime = Date.now();
-  let intervalId;
+  let lastOffsetTime = startTime; // Track last offset update
 
-  const runTestCycle = async () => {
-    if (Date.now() - startTime >= duration) {
-      clearInterval(intervalId);
-      console.log("Test Completed!");
-      return;
+  while (Date.now() - startTime < duration) {
+    let successful = 0,
+      failed = 0;
+
+    const requests = [];
+    for (let i = 0; i < tps; i++) {
+      requests.push(
+        axios
+          .get(API_URL)
+          .then(() => successful++)
+          .catch(() => failed++)
+      );
     }
-    await sendRequests(tps);
-  };
 
-  intervalId = setInterval(runTestCycle, 1000);
+    await Promise.all(requests);
+    console.log(`TPS: ${tps} | Successful: ${successful}, Failed: ${failed}`);
 
-  const offsetInterval = setInterval(() => {
-    if (Date.now() - startTime >= duration) {
-      clearInterval(offsetInterval);
-      return;
-    }
-    tps += offset;
-    console.log(`Updated TPS: ${tps}`);
-  }, interval);
+    //increasing the offset after a certain time
+    if (Date.now() - lastOffsetTime >= interval) {
+      tps += offset;
+      console.log(`Updated TPS: ${tps}`);
+      lastOffsetTime = Date.now(); //re-setting the offset time
+
+    await new Promise((res) => setTimeout(res, 1000)); // Wait 1 sec before next round
+  }
+
+  console.log("Test is Completed! Exiting...");
 };
 
 runLoadTest();
