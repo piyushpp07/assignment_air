@@ -1,42 +1,71 @@
+const express = require("express");
+const cors = require("cors");
 const axios = require("axios");
+require("dotenv").config();
 
-const API_URL = "http://localhost:3001/";
-let tps = 500; // Initial TPS
-const offset = 100; // Increase TPS after a certain time
-const interval = 5000; // Time interval for increasing the tps
-const duration = 20000; // total test duration 
+const app = express();
+const PORT = process.env.PORT || 5002;
 
-const runLoadTest = async () => {
+app.use(cors());
+app.use(express.json());
+
+let results = [];
+let isRunning = false;
+
+app.post("/start-test", async (req, res) => {
+  if (isRunning)
+    return res.status(400).json({ message: "Test already running" });
+
+  const { tps, duration, offset, offsetInterval } = req.body;
+  let currentTps = tps;
   const startTime = Date.now();
-  let lastOffsetTime = startTime; // Track last offset update
+  let lastOffsetUpdate = startTime;
+
+  isRunning = true;
+  results = [];
 
   while (Date.now() - startTime < duration) {
     let successful = 0,
       failed = 0;
+    let failureReasons = {};
 
     const requests = [];
-    for (let i = 0; i < tps; i++) {
+    for (let i = 0; i < currentTps; i++) {
       requests.push(
         axios
-          .get(API_URL)
+          .get(process.env.URL)
           .then(() => successful++)
-          .catch(() => failed++)
+          .catch((err) => {
+            failed++;
+            let reason = err.response?.status || "Unknown Error";
+            failureReasons[reason] = (failureReasons[reason] || 0) + 1;
+          })
       );
     }
 
-    await Promise.all(requests);
-    console.log(`TPS: ${tps} | Successful: ${successful}, Failed: ${failed}`);
+    await Promise.allSettled(requests);
 
-    //increasing the offset after a certain time
-    if (Date.now() - lastOffsetTime >= interval) {
-      tps += offset;
-      console.log(`Updated TPS: ${tps}`);
-      lastOffsetTime = Date.now(); //re-setting the offset time
+    console.log(
+      `TPS: ${currentTps}, Successful: ${successful}, Failed: ${failed}, Reasons:`,
+      failureReasons
+    );
 
-    await new Promise((res) => setTimeout(res, 1000)); // Wait 1 sec before next round
+    results.push({ tps: currentTps, successful, failed, failureReasons });
+
+    if (Date.now() - lastOffsetUpdate >= offsetInterval) {
+      currentTps += offset;
+      lastOffsetUpdate = Date.now();
+    }
+
+    await new Promise((res) => setTimeout(res, 1000)); // Ensure 1-second delay before next iteration
   }
 
-  console.log("Test is Completed! Exiting...");
-};
+  isRunning = false;
+  res.json({ message: "Test completed" });
+});
 
-runLoadTest();
+app.get("/results", (req, res) => {
+  res.json(results);
+});
+
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
